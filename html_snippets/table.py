@@ -1,10 +1,11 @@
 import base64
 import io
 from tqdm import tqdm
-
+import uuid
 
 table_sort_script = """
-    <script>
+<script>
+    // This script is the Search/Filter functionality.
     var TableFilter = (function(myArray) {
         var search_input;
         function _onInputSearch(e) {
@@ -31,26 +32,24 @@ table_sort_script = """
     })(Array.prototype);
 
     TableFilter.init();
-    </script>
+</script>
 
-    <script>
+<script>
+    // This script is the Sorting functionality.
     const getCellValue = (tr, idx) => tr.children[idx].innerText || tr.children[idx].textContent;
-
     const comparer = (idx, asc) => (a, b) => ((v1, v2) =>
         v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? v1 - v2 : v1.toString().localeCompare(v2)
         )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
 
     // do the work...
-    document.querySelectorAll('th').forEach(th => th.addEventListener('click', (() => {
+    document.querySelectorAll("tr.sortable_columns > th").forEach(th => th.addEventListener('click', (() => {
         const table = th.closest('table')
         const tbody = table.querySelectorAll('tbody')[0];
-        console.log(tbody)
         Array.from(tbody.querySelectorAll('tr:nth-child(n+1)'))
             .sort(comparer(Array.from(th.parentNode.children).indexOf(th), this.asc = !this.asc))
             .forEach(tr => tbody.appendChild(tr) );
     })));
-    </script>
-
+</script>
 """
 
 table_style = """
@@ -65,29 +64,30 @@ table_style = """
         z-index: 3;
         top: 0;
     }
-    #colon_index th:hover {background-color: rgb(133, 67, 16);}
-    #colon_index {
+    #html_snippets_table th:hover {background-color: rgb(133, 67, 16);}
+    #html_snippets_table {
       font-family: Arial, Helvetica, sans-serif;
       border-collapse: collapse;
       width: 100%;
       background-color: white;
     }
-    #colon_index td, #colon_index th {
+    #html_snippets_table td, #html_snippets_table th {
       border: 1px solid #ddd;
       padding: 8px;
     }
-    #colon_index tr:nth-child(even){background-color: #f2f2f2;}
-    #colon_index tr:hover {background-color: #ddd;}
-    #colon_index th {
+    #html_snippets_table tr:nth-child(even){background-color: #f2f2f2;}
+    #html_snippets_table tr:hover {background-color: #ddd;}
+    #html_snippets_table th {
       padding-top: 12px;
       padding-bottom: 12px;
       text-align: left;
       background-color: #505050;
       color: white;
     }
-    #colon_index :target {
+    #html_snippets_table :target {
       color: red;
-      border-style: dashed;;
+	  border-color: darkred;
+      border-style: double;
     }
 </style>
 """
@@ -106,6 +106,7 @@ def longest_common_prefix(strings):
 
 
 def collect_prefixes(lst):
+    """A heuristic used to guess common prefixes."""
     lists = [[]]
     for item in lst:
         if len(lists[-1]) == 0 or lists[-1][0][:3] == item[:3]:
@@ -116,9 +117,18 @@ def collect_prefixes(lst):
     return {longest_common_prefix(lst): lst if len(lst)>1 else [] for lst in lists}
 
 
-def create_table_header(data):
+def create_fancy_table_header(data):
+    """Helper function for fancy headers spanning two rows.
+    Example: html_table with "Position X" and "Position Y" and fance_header=True:
+                 | Position  |                 
+     | id  | foo | X   | Y   | bar | ...       |
+     |-----------------------------------------|
+     | ... | ... | ... | ... | ... |...        |
+     
+    See also: collect_prefixes
+    """
     header_html = "  <thead>\n    <tr>\n"
-    colgroup_html = '    <colgroup>\n'
+    colgroup_html = '  <colgroup>\n'
     colspan = 0
 
     # Iterate over dictionary keys and values
@@ -135,11 +145,11 @@ def create_table_header(data):
         else:
             # Add an empty header for keys with an empty list value
             header_html += "       <th colspan='1'></th>\n"
-            colgroup_html += f"      <col span='1'>\n"
+            colgroup_html += f"    <col span='1'>\n"
             value += [key]
-    colgroup_html += '    </colgroup>\n'
+    colgroup_html += '  </colgroup>\n'
     
-    header_html += "    </tr>\n    <tr>\n"
+    header_html += "    </tr>\n    <tr  class='sortable_columns'>\n"
 
     # Add the second row of headers
     for key, value in data.items():
@@ -156,59 +166,70 @@ def create_table_header(data):
     return header_html, colgroup_html
 
 
-def html_table(table_data, preface="", appendix="", common_path="", thumbnail_size=[64, 64], identifier='id',
-               simple=False, fancy_header=False, caption=None, summary=None, highlight_rows=[]):
+def html_table(table_data, identifier='id', simple=False, fancy_header=False, preface=None, appendix=None,
+                caption=None, summary=None, highlight_rows=[], fixed_header=[], common_path="", thumbnail_size=[64, 64]):
     """
     Generates an HTML table from a list of dictionaries representing tabular data.
 
     Args:
         table_data (list of dict): List of dictionaries representing the table.
-        preface (str): Additional HTML code to be inserted before the table.
-        appendix (str): Additional HTML code to be inserted after the table.
-        common_path (str): Common path for thumbnail images, if applicable.
-        thumbnail_size (list): List containing width and height of thumbnail images.
         identifier (str): Column used for html anchors (e.g. file.html#<id> will scroll to a row) 
         simple (bool): If True, generates a simple table without styling and scripting.
         fancy_header (bool): If True, generates two row table header by collecting common prefixes.
+        
+        preface (str): Additional HTML code to be inserted before the table.
+        appendix (str): Additional HTML code to be inserted after the table.
         caption (str): Title of table shown above.
         summary (str): Explanation what is shown in the table.
-        highlight_rows (list of int): Rows that are highlighted
+        highlight_rows: (list of int): Rows that are highlighted
+        fixed_header: these header elements will be forced to be in that order and at the left of the table.
+        common_path (str): Common path for thumbnail images, if applicable.
+        thumbnail_size (list): List containing width and height of thumbnail images.
 
     Returns:
         tuple: A tuple containing HTML code for the table head, body, and tail.
     """
-    table_headers = list(table_data[0].keys())
-    colgroup_html = ''
+
+    # Identifier to differentiate between multiple tables for sorting and searching
+    table_uid = str(uuid.uuid4())[:6]
     
+    table_headers = [] + fixed_header   #  <-- BUG?!
+    for row in table_data:
+        for key in row.keys():
+            if not key in table_headers:
+                table_headers += [key]
+    
+    colgroup_html = ''
+
     if not simple:
         # This is the minimal html code to create a searchable and sortable list
-        head = table_style
-        tail = table_sort_script
-    
-        body = "<div class='preface'>\n" + preface + "\n</div>"
-        body += """
-        <input type="search" placeholder="Search..." class="form-control search-input" data-table="colon_data" style="margin: 10px; padding 4px;"/>
-        <br>
-        """
+        head = table_style.replace('html_snippets_table', f'table_{table_uid}')
+        tail = table_sort_script.replace('html_snippets_table', f'table_{table_uid}')
+
+        body = preface if preface else ""
+
+        body += f'<input type="search" placeholder="Search..." class="form-control search-input" data-table="table_{table_uid}" style="margin: 10px; padding 4px;"/><br>\n'
     else:
         # Simple case: we just display a table, not using any javascript
         head = tail = body = ""
 
-    body += "<table  id=\"colon_index\" class=\"fixed_header sortable colon_data\">\n"
-
-    if caption is not None:
-        body += f'<caption>{caption}</caption>\n'
     if summary is not None:
         body += f'<span>{summary}</span>\n'
+
+    body += f"<table  id=\"table_{table_uid}\" class=\"fixed_header sortable colon_data\">\n"  # fixme: remove sortable? I have sortable_columns class now.
+
+    if caption is not None:
+        body += f'  <caption>{caption}</caption>\n'
         
     if fancy_header:
         # Group columns with common prefix and show a second table header.
         header_dict = collect_prefixes(table_headers)
-        header_html, colgroup_html =  create_table_header(header_dict)
+        header_html, colgroup_html =  create_fancy_table_header(header_dict)
+        body += colgroup_html
         body += header_html
     else:
         body += "  <thead>\n"
-        body += "    <tr>\n"
+        body += "    <tr class='sortable_columns'>\n"
     
         for header in table_headers:
             body += f"      <th>{header}</th>\n"
@@ -218,7 +239,6 @@ def html_table(table_data, preface="", appendix="", common_path="", thumbnail_si
 
     # Write the actual table rows
     body += "  <tbody>\n"
-    body += colgroup_html
     if not simple and len(table_data) > 100:
         table_data = tqdm(table_data)
     for idx, row_data in enumerate(table_data):
@@ -228,10 +248,10 @@ def html_table(table_data, preface="", appendix="", common_path="", thumbnail_si
         else:
             anchor = ""
         if idx in highlight_rows:
-            highlight_style = "style='border: 1px solid orange;'"
+            highlight_style = " style='border: 1px solid orange;'"
         else:
             highlight_style = ''
-        body += f"    <tr{anchor} {highlight_style}>\n"
+        body += f"    <tr{anchor}{highlight_style}>\n"
         for entry in table_headers:
             if entry in row_data:
                 body += f"      <td>{row_data[entry]}</td>\n"
@@ -242,7 +262,8 @@ def html_table(table_data, preface="", appendix="", common_path="", thumbnail_si
 
     body += "</table>\n"
     body += "\n"
-    body += appendix
+    if appendix is not None:
+        body += appendix
     body += "\n"
 
     return head, body, tail

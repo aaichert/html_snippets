@@ -5,7 +5,7 @@ def html_auto_blend_last_child(html):
   text-align: left;
   position: relative;
 }
-.auto_blend *:last-child {
+.auto_blend *:last-child * {
   position: absolute;
   top: 0;
   left: 0;
@@ -50,7 +50,7 @@ def html_auto_show_hide_last_child(html):
   text-align: left;
   position: relative;
 }
-.auto_show_hide *:last-child {
+.auto_show_hide *:last-child * {
   position: absolute;
   top: 0;
   left: 0;
